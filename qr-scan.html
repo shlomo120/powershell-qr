@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR Scanner</title>
+<style>
+  :root {
+    --blue: #0a84ff; --green: #30d158; --label: #fff; --label2: rgba(235,235,245,.6);
+    --material: rgba(30,30,32,.55); --material-thick: rgba(28,28,30,.78);
+    --spring: cubic-bezier(.32,.72,0,1);
+    color-scheme: dark;
+    font: 100%/1.4 system-ui, -apple-system, "Segoe UI Variable", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--label); overflow: hidden; }
+
+  video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .4s ease; }
+  video.live { opacity: 1; }
+  video.mirror { transform: scaleX(-1); }
+
+  /* translucent chrome floating over the camera */
+  .bar {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: .5rem; padding: .5rem;
+    background: var(--material); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 999px;
+  }
+  .top { top: 1rem; }
+  .bottom { bottom: 1.5rem; flex-direction: column; align-items: stretch; gap: .6rem; border-radius: 1.25rem; padding: .9rem 1.1rem; width: min(92vw, 30rem); }
+
+  button, .file, select {
+    font: inherit; font-size: .9375rem; font-weight: 500; color: var(--label); letter-spacing: -.01em;
+    background: rgba(255,255,255,.12); border: 0; border-radius: 999px; padding: .5rem 1rem; cursor: pointer;
+    transition: transform .1s ease-out, background-color .15s ease;
+  }
+  button:hover, .file:hover, select:hover { background: rgba(255,255,255,.18); }
+  button:active, .file:active { transform: scale(.96); transition-duration: 0s; }
+  button.primary { background: var(--blue); font-weight: 600; }
+  button.primary:hover { background: #3b9bff; }
+  select { appearance: none; max-width: 14rem; text-overflow: ellipsis; }
+  select option { background: #1c1c1e; }
+  .file input { display: none; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  /* empty state */
+  #intro { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1rem; text-align: center; padding: 2rem; }
+  #intro h1 { margin: .5rem 0 0; font-size: 2rem; line-height: 1.1; letter-spacing: -.025em; font-weight: 700; }
+  #intro p { margin: 0 0 .75rem; color: var(--label2); max-width: 22rem; }
+  #intro button.primary { font-size: 1.0625rem; padding: .75rem 1.75rem; }
+  .glyph { width: 4.5rem; height: 4.5rem; color: var(--blue); }
+
+  /* viewfinder */
+  #finder {
+    position: fixed; top: 50%; left: 50%; width: min(60vmin, 26rem); aspect-ratio: 1;
+    transform: translate(-50%,-50%); color: rgba(255,255,255,.9); pointer-events: none;
+    opacity: 0; transition: opacity .3s ease, color .2s ease;
+    filter: drop-shadow(0 0 6px rgba(0,0,0,.4));
+  }
+  #finder.live { opacity: 1; }
+  #finder.hit { color: var(--green); }
+
+  /* progress */
+  #status { font-size: .9375rem; font-weight: 600; letter-spacing: -.01em; text-align: center; }
+  #sub { font-size: .8125rem; color: var(--label2); text-align: center; margin-top: -.35rem; min-height: 1.1em; }
+  #segments { display: flex; gap: 3px; height: 6px; }
+  #segments:empty { display: none; }
+  #segments i { flex: 1; min-width: 0; border-radius: 3px; background: rgba(255,255,255,.18); transition: background-color .25s ease, transform .35s var(--spring); }
+  #segments i.on { background: var(--green); }
+  #segments i.pop { transform: scaleY(1.8); }
+
+  /* result sheet: enters and leaves along the same path, from the progress bar below */
+  #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .4s ease; }
+  #sheet {
+    position: fixed; left: 50%; bottom: 0; width: min(100vw, 40rem); max-height: 85vh;
+    display: flex; flex-direction: column; gap: .9rem; padding: .6rem 1.25rem 1.5rem;
+    background: var(--material-thick); backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border-radius: 1.25rem 1.25rem 0 0; border-top: 1px solid rgba(255,255,255,.12);
+    box-shadow: 0 -10px 40px rgba(0,0,0,.45);
+    transform: translate(-50%, 105%); transition: transform .5s var(--spring);
+  }
+  body.done #sheet { transform: translate(-50%, 0); }
+  body.done #scrim { opacity: 1; pointer-events: auto; }
+  .grabber { width: 2.25rem; height: 5px; border-radius: 3px; background: rgba(255,255,255,.3); margin: 0 auto .2rem; }
+  #sheet h2 { margin: 0; font-size: 1.375rem; line-height: 1.2; letter-spacing: -.02em; display: flex; align-items: center; gap: .5rem; }
+  #sheet h2 svg { width: 1.5rem; height: 1.5rem; color: var(--green); flex: none; }
+  #meta { color: var(--label2); font-size: .875rem; margin-top: -.6rem; }
+  #out {
+    flex: 1; min-height: 10rem; resize: none; font: inherit; font-size: 1rem; line-height: 1.5; color: var(--label);
+    background: rgba(0,0,0,.3); border: 0; border-radius: .75rem; padding: .85rem 1rem;
+  }
+  .actions { display: flex; gap: .5rem; }
+  .actions button { flex: 1; padding: .7rem 1rem; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #sheet { transition: opacity .2s ease; opacity: 0; transform: translate(-50%, 0); }
+    body.done #sheet { opacity: 1; }
+    #segments i.pop { transform: none; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .bar, #sheet { background: #1c1c1e; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+  @media (prefers-contrast: more) {
+    .bar, #sheet { background: #000; border: 1px solid #fff; }
+  }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+
+<svg id="finder" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+  <path d="M2 20V10a8 8 0 0 1 8-8h10M80 2h10a8 8 0 0 1 8 8v10M98 80v10a8 8 0 0 1-8 8H80M20 98H10a8 8 0 0 1-8-8V80"/>
+</svg>
+
+<section id="intro">
+  <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+    <rect x="7" y="7" width="4" height="4" rx=".5"/><rect x="13" y="13" width="4" height="4" rx=".5"/><path d="M13 7h4v2M7 15v2h2"/>
+  </svg>
+  <h1>Scan QR Codes</h1>
+  <p>Show the codes to your camera one at a time, in any order. Split text is joined automatically.</p>
+  <button class="primary" id="start">Start Camera</button>
+  <label class="file">Choose Images…<input type="file" id="files" accept="image/*" multiple></label>
+</section>
+
+<nav class="bar top" id="topbar" hidden>
+  <select id="cams" hidden aria-label="Camera"></select>
+  <label class="file">Images<input type="file" id="files2" accept="image/*" multiple></label>
+  <button id="reset">Clear</button>
+</nav>
+
+<div class="bar bottom" id="progress" hidden>
+  <div id="status">Point the camera at a QR code</div>
+  <div id="segments"></div>
+  <div id="sub"></div>
+</div>
+
+<div id="scrim"></div>
+<section id="sheet" aria-live="polite">
+  <div class="grabber"></div>
+  <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m7.5 12.5 3 3 6-6.5"/></svg>Scanned</h2>
+  <div id="meta"></div>
+  <textarea id="out" dir="auto" readonly></textarea>
+  <div class="actions">
+    <button class="primary" id="copy">Copy</button>
+    <button id="save">Save .txt</button>
+    <button id="again">Scan Again</button>
+  </div>
+</section>
+
+<script src="jsQR.js"></script>
+<script id="core">
+// Reassembles "[i/N]text" parts produced by qr.ps1; plain codes pass straight through.
+let parts = {}, total = 0;
+function decode(code) { return new TextDecoder().decode(new Uint8Array(code.binaryData)); }
+function addPayload(text) {
+  const m = /^\[(\d+)\/(\d+)\]/.exec(text);
+  if (!m) return { done: text };
+  const i = +m[1], n = +m[2];
+  if (n !== total) { parts = {}; total = n; }   // a different set started
+  const isNew = !(i in parts);
+  parts[i] = text.slice(m[0].length);
+  const missing = [];
+  for (let k = 1; k <= n; k++) if (!(k in parts)) missing.push(k);
+  if (missing.length) return { have: n - missing.length, n, missing, isNew };
+  let s = ''; for (let k = 1; k <= n; k++) s += parts[k];
+  return { done: s, n, isNew };
+}
+function resetParts() { parts = {}; total = 0; }
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $('video'), finder = $('finder'), segs = $('segments');
+const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+let stream = null, lastDone = null, hitTimer;
+
+function setStatus(main, sub = '') { $('status').textContent = main; $('sub').textContent = sub; }
+
+function drawSegments(n, i) {
+  if (segs.children.length !== n) {
+    segs.style.gap = n > 40 ? '1px' : '3px';
+    segs.innerHTML = '<i></i>'.repeat(n);
+  }
+  for (let k = 1; k <= n; k++) segs.children[k - 1].classList.toggle('on', k in parts);
+  if (i) {   // pop the segment that just landed, so it's clear what the scan caused
+    const el = segs.children[i - 1];
+    el.classList.add('pop'); setTimeout(() => el.classList.remove('pop'), 180);
+  }
+}
+
+function flash() {
+  finder.classList.add('hit');
+  clearTimeout(hitTimer); hitTimer = setTimeout(() => finder.classList.remove('hit'), 450);
+}
+
+function show(r, text) {
+  const m = /^\[(\d+)\//.exec(text);
+  if (r.n) drawSegments(r.n, r.isNew && m ? +m[1] : 0);
+  if (r.isNew !== false) flash();
+  if ('done' in r) {
+    lastDone = r.done;
+    $('out').value = r.done;
+    $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + `${[...r.done].length.toLocaleString()} characters`;
+    setStatus(r.n ? `All ${r.n} codes scanned` : 'Code scanned');
+    document.body.classList.add('done');
+  } else {
+    setStatus(`${r.have} of ${r.n} scanned`, `Still need: ${r.missing.length > 12 ? r.missing.slice(0, 12).join(', ') + '…' : r.missing.join(', ')}`);
+  }
+}
+
+function scan(source, w, h) {
+  canvas.width = w; canvas.height = h;
+  ctx.drawImage(source, 0, 0, w, h);
+  const code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+  if (!code || !code.binaryData.length) return false;
+  const text = decode(code);
+  if (text === lastDone) return true;   // same single code still in view
+  show(addPayload(text), text);
+  return true;
+}
+
+function loop() {
+  if (!stream) return;
+  if (video.readyState >= 2 && !document.body.classList.contains('done')) scan(video, video.videoWidth, video.videoHeight);
+  setTimeout(loop, 120);
+}
+
+function enterScanner() {
+  $('intro').hidden = true; $('topbar').hidden = false; $('progress').hidden = false;
+}
+
+async function startCamera(deviceId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+  if (deviceId) v.deviceId = { exact: deviceId };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: v });
+  } catch (e) {
+    stream = null;
+    $('intro').querySelector('p').textContent = 'Couldn’t open the camera: ' + e.message;
+    return;
+  }
+  enterScanner();
+  video.srcObject = stream;
+  await video.play();
+  const settings = stream.getVideoTracks()[0].getSettings();
+  video.classList.toggle('mirror', settings.facingMode !== 'environment');   // selfie cameras read like a mirror
+  video.classList.add('live'); finder.classList.add('live');
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  const sel = $('cams');
+  sel.innerHTML = cams.map((c, i) => `<option value="${c.deviceId}">${c.label || 'Camera ' + (i + 1)}</option>`).join('');
+  sel.value = settings.deviceId;
+  sel.hidden = cams.length < 2;
+  loop();
+}
+
+async function scanFiles(e) {
+  enterScanner();
+  for (const f of e.target.files) {
+    const img = await createImageBitmap(f);
+    if (!scan(img, img.width, img.height)) setStatus('No QR code found', f.name);
+  }
+  e.target.value = '';
+}
+
+function clearAll() {
+  resetParts(); $('out').value = ''; segs.innerHTML = '';   // keep lastDone so the code still in view doesn't reopen the sheet
+  document.body.classList.remove('done');
+  setStatus('Point the camera at a QR code');
+}
+
+$('start').onclick = () => startCamera();
+$('cams').onchange = () => startCamera($('cams').value);
+$('files').onchange = $('files2').onchange = scanFiles;
+$('reset').onclick = $('again').onclick = $('scrim').onclick = clearAll;
+addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('done')) clearAll(); });
+
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText($('out').value);
+  const b = $('copy'); b.textContent = 'Copied ✓';
+  setTimeout(() => b.textContent = 'Copy', 1400);
+};
+$('save').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([$('out').value], { type: 'text/plain;charset=utf-8' }));
+  a.download = 'qr-text.txt';
+  a.click();
+};
+</script>
+</body>
+</html>

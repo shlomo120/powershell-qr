@@ -37,6 +37,15 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 - Encodes in byte mode as UTF-8, so Hebrew, emoji and other non-Latin text work.
 - Splitting never breaks a UTF-8 character.
 
+### Scanner (camera)
+
+**Live: https://shlomo120.github.io/powershell-qr/qr-scan.html** (works on phones too).
+Everything runs in your browser and the scanned text is never uploaded.
+
+To use it offline, open `qr-scan.html` in Edge or Chrome (keep `jsQR.js` next to it), click **Start Camera**, and show the codes one by one in any order.
+Multi-part `[i/N]` codes are joined automatically and the missing parts are listed. You can also load images instead of using the camera. Works offline, nothing to install.
+Laptop webcams struggle with dense codes, so for camera scanning generate with a smaller `-MaxVersion` (e.g. `10`).
+
 ---
 
 <div dir="rtl">
@@ -80,4 +89,17 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 - הקידוד הוא במצב byte ב-UTF-8, כך שעברית, אימוג'י וטקסט שאינו לטיני עובדים.
 - הפיצול אף פעם לא חותך תו UTF-8 באמצע.
 
+### סורק (מצלמה)
+
+**גרסה חיה: https://shlomo120.github.io/powershell-qr/qr-scan.html** (עובד גם בטלפון).
+הכול רץ בדפדפן, והטקסט הסרוק לא נשלח לשום מקום.
+
+לשימוש בלי אינטרנט, פותחים את `qr-scan.html` ב-Edge או Chrome (הקובץ `jsQR.js` צריך להיות באותה תיקייה), לוחצים **Start Camera** ומציגים את הקודים אחד אחרי השני, בכל סדר.
+קודים מפוצלים `[i/N]` מתחברים אוטומטית, והסורק מציג אילו חלקים חסרים. אפשר גם לטעון תמונות במקום להשתמש במצלמה. עובד בלי אינטרנט ובלי התקנה.
+מצלמות של מחשבים ניידים מתקשות בקודים צפופים, ולכן לסריקה במצלמה עדיף לייצר קודים עם `-MaxVersion` קטן יותר (למשל `10`).
+
 </div>
+
+---
+
+Scanner uses [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0, see `LICENSE-jsQR`).
