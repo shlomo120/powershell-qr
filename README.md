@@ -30,12 +30,29 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 | `-Mask` | `-1` | `-1` = auto (lowest penalty), `0`-`7` = fixed mask (faster) |
 | `-NoHeader` | | Don't add the `[i/N]` prefix when splitting |
 | `-Eci` | | Add an ECI 26 (UTF-8) header, for older scanners |
+| `-AsFile` | | Send `-Path` as a file (any type: zip, pdf, exe...) |
 | `-Open` | | Open the HTML when done |
 
 ### Notes
 
 - Encodes in byte mode as UTF-8, so Hebrew, emoji and other non-Latin text work.
 - Splitting never breaks a UTF-8 character.
+
+### File transfer
+
+Sends any file from a locked-down PC: the sender only needs `qr.ps1`. It runs on built-in Windows PowerShell 5.1 with no admin, no install and no internet.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
+```
+
+On the receiving side, scan the codes with `qr-scan.html` (any order). When the last code is scanned, it rebuilds the file, checks its SHA-256 and shows **Save file**.
+
+Guidelines:
+- The file is gzipped and then base64-encoded. At `-ErrorCorrection L -MaxVersion 10` each code holds about 270 bytes of base64, so 100 KB of compressed data needs about 500 codes. Keep transfers small and zip them first if you need to.
+- `-Mask 0` skips the automatic mask search, which makes generation about 8x faster.
+- If you see **SHA-256 MISMATCH**, click Clear and scan everything again.
+- `-ExecutionPolicy Bypass` on the command line applies only to that run and needs no admin.
 
 ### Scanner (camera)
 
@@ -82,12 +99,33 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 | `-Mask` | `-1` | `-1` = בחירה אוטומטית (הניקוד הנמוך ביותר), `0`-`7` = מסכה קבועה (מהיר יותר) |
 | `-NoHeader` | | בלי קידומת `[i/N]` בפיצול |
 | `-Eci` | | הוספת כותרת ECI 26 (UTF-8) לסורקים ישנים |
+| `-AsFile` | | שליחת `-Path` כקובץ מכל סוג (zip, pdf, exe...) |
 | `-Open` | | פתיחת קובץ ה-HTML בסיום |
 
 ### הערות
 
 - הקידוד הוא במצב byte ב-UTF-8, כך שעברית, אימוג'י וטקסט שאינו לטיני עובדים.
 - הפיצול אף פעם לא חותך תו UTF-8 באמצע.
+
+### העברת קבצים
+
+שליחת כל קובץ ממחשב נעול: בצד השולח צריך רק את `qr.ps1`. הסקריפט רץ על Windows PowerShell 5.1 המובנה, בלי הרשאות מנהל, בלי התקנה ובלי אינטרנט.
+
+</div>
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
+```
+
+<div dir="rtl">
+
+בצד המקבל סורקים את הקודים עם `qr-scan.html`, בכל סדר. אחרי הקוד האחרון הסורק בונה מחדש את הקובץ, בודק את ה-SHA-256 שלו ומציג כפתור **Save file**.
+
+הנחיות:
+- הקובץ נדחס ב-gzip ומקודד ב-base64. עם `-ErrorCorrection L -MaxVersion 10` כל קוד מכיל כ-270 בתים של base64, כך ש-100KB אחרי דחיסה דורשים כ-500 קודים. כדאי להעביר קבצים קטנים, ולדחוס ל-zip מראש אם צריך.
+- `-Mask 0` מדלג על חיפוש המסכה האוטומטי, וכך היצירה מהירה פי 8 בערך.
+- אם מופיע **SHA-256 MISMATCH**, לוחצים Clear וסורקים הכול מחדש.
+- `-ExecutionPolicy Bypass` בשורת הפקודה חל רק על ההרצה הזו ולא דורש הרשאות מנהל.
 
 ### סורק (מצלמה)
 

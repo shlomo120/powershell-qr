@@ -21,6 +21,7 @@ param(
     [ValidateRange(-1, 7)][int]$Mask = -1,            # -1 = auto (best penalty); 0-7 = fixed (faster)
     [switch]$NoHeader,                                # don't add [i/N] prefix when splitting
     [switch]$Eci,                                     # add ECI 26 (UTF-8) header - for old scanners
+    [Parameter(ParameterSetName = 'File')][switch]$AsFile,   # send -Path as a binary file (gzip + base64)
     [switch]$Open                                     # open the HTML when done
 )
 
@@ -367,7 +368,16 @@ function Split-Utf8([string]$str, [int]$budget) {
 }
 
 # ================= Main =================
-if ($PSCmdlet.ParameterSetName -eq 'File') { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
+if ($AsFile) {
+    # Payload: "QRFILE:<sha256 of original>:<file name>`n<base64 of gzip>". qr-scan.html unpacks and verifies it.
+    $raw = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).ProviderPath)
+    $ms = New-Object IO.MemoryStream
+    $gz = New-Object IO.Compression.GZipStream($ms, [IO.Compression.CompressionMode]::Compress)
+    $gz.Write($raw, 0, $raw.Length); $gz.Close()
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
+    $Text = "QRFILE:${hash}:$([IO.Path]::GetFileName($Path))`n" + [Convert]::ToBase64String($ms.ToArray())
+    Write-Host "File: $($raw.Length) bytes -> $($ms.ToArray().Length) gzipped"
+} elseif ($PSCmdlet.ParameterSetName -eq 'File') { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
 if ([string]::IsNullOrEmpty($Text)) { throw 'Empty input.' }
 
 $eIdx = @{ L = 0; M = 1; Q = 2; H = 3 }[$ErrorCorrection]

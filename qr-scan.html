@@ -168,13 +168,22 @@ function addPayload(text) {
   return { done: s, n, isNew };
 }
 function resetParts() { parts = {}; total = 0; }
+// Unpacks "QRFILE:<sha256>:<name>\n<base64 gzip>" from qr.ps1 -AsFile. Returns null for plain text.
+async function unpackFile(text) {
+  const m = /^QRFILE:([0-9a-f]{64}):([^\n]*)\n/.exec(text);
+  if (!m) return null;
+  const gz = Uint8Array.from(atob(text.slice(m[0].length)), c => c.charCodeAt(0));
+  const data = new Uint8Array(await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('');
+  return { name: m[2] || 'file.bin', data, ok: hash === m[1] };
+}
 </script>
 
 <script>
 const $ = id => document.getElementById(id);
 const video = $('video'), finder = $('finder'), segs = $('segments');
 const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
-let stream = null, lastDone = null, hitTimer;
+let stream = null, lastDone = null, file = null, hitTimer;
 
 function setStatus(main, sub = '') { $('status').textContent = main; $('sub').textContent = sub; }
 
@@ -195,14 +204,23 @@ function flash() {
   clearTimeout(hitTimer); hitTimer = setTimeout(() => finder.classList.remove('hit'), 450);
 }
 
-function show(r, text) {
+async function show(r, text) {
   const m = /^\[(\d+)\//.exec(text);
   if (r.n) drawSegments(r.n, r.isNew && m ? +m[1] : 0);
   if (r.isNew !== false) flash();
   if ('done' in r) {
     lastDone = r.done;
-    $('out').value = r.done;
-    $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + `${[...r.done].length.toLocaleString()} characters`;
+    try { file = await unpackFile(r.done); } catch (e) { file = { error: e.message }; }
+    if (file) {
+      $('out').value = file.error ? 'Could not rebuild the file: ' + file.error
+        : `${file.name}\n${file.data.length.toLocaleString()} bytes\n` + (file.ok ? 'SHA-256 verified ✓' : '⚠ SHA-256 MISMATCH – the file is corrupt, rescan');
+      $('save').textContent = 'Save file';
+      $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + 'file';
+    } else {
+      $('out').value = r.done;
+      $('save').textContent = 'Save .txt';
+      $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + `${[...r.done].length.toLocaleString()} characters`;
+    }
     setStatus(r.n ? `All ${r.n} codes scanned` : 'Code scanned');
     document.body.classList.add('done');
   } else {
@@ -266,7 +284,7 @@ async function scanFiles(e) {
 }
 
 function clearAll() {
-  resetParts(); $('out').value = ''; segs.innerHTML = '';   // keep lastDone so the code still in view doesn't reopen the sheet
+  resetParts(); file = null; $('out').value = ''; segs.innerHTML = '';   // keep lastDone so the code still in view doesn't reopen the sheet
   document.body.classList.remove('done');
   setStatus('Point the camera at a QR code');
 }
@@ -284,8 +302,13 @@ $('copy').onclick = async () => {
 };
 $('save').onclick = () => {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([$('out').value], { type: 'text/plain;charset=utf-8' }));
-  a.download = 'qr-text.txt';
+  if (file && file.data) {
+    a.href = URL.createObjectURL(new Blob([file.data]));
+    a.download = file.name;
+  } else {
+    a.href = URL.createObjectURL(new Blob([$('out').value], { type: 'text/plain;charset=utf-8' }));
+    a.download = 'qr-text.txt';
+  }
   a.click();
 };
 </script>
