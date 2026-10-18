@@ -21,7 +21,7 @@ param(
     [ValidateRange(-1, 7)][int]$Mask = -1,            # -1 = auto (best penalty); 0-7 = fixed (faster)
     [switch]$NoHeader,                                # don't add [i/N] prefix when splitting
     [switch]$Eci,                                     # add ECI 26 (UTF-8) header - for old scanners
-    [Parameter(ParameterSetName = 'File')][switch]$AsFile,   # send -Path as a binary file (gzip + base64)
+    [Parameter(ParameterSetName = 'File')][switch]$AsFile,   # send -Path as a binary file (gzip, raw bytes)
     [switch]$Open                                     # open the HTML when done
 )
 
@@ -368,49 +368,70 @@ function Split-Utf8([string]$str, [int]$budget) {
 }
 
 # ================= Main =================
-if ($AsFile) {
-    # Payload: "QRFILE:<sha256 of original>:<file name>`n<base64 of gzip>". qr-scan.html unpacks and verifies it.
-    $raw = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).ProviderPath)
-    $ms = New-Object IO.MemoryStream
-    $gz = New-Object IO.Compression.GZipStream($ms, [IO.Compression.CompressionMode]::Compress)
-    $gz.Write($raw, 0, $raw.Length); $gz.Close()
-    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
-    $Text = "QRFILE:${hash}:$([IO.Path]::GetFileName($Path))`n" + [Convert]::ToBase64String($ms.ToArray())
-    Write-Host "File: $($raw.Length) bytes -> $($ms.ToArray().Length) gzipped"
-} elseif ($PSCmdlet.ParameterSetName -eq 'File') { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
-if ([string]::IsNullOrEmpty($Text)) { throw 'Empty input.' }
-
 $eIdx = @{ L = 0; M = 1; Q = 2; H = 3 }[$ErrorCorrection]
 $eclBits = @{ L = 1; M = 0; Q = 3; H = 2 }[$ErrorCorrection]
 $utf8 = [System.Text.Encoding]::UTF8
 $maxCap = Get-ByteCapacity $MaxVersion $eIdx
-$totalBytes = $utf8.GetByteCount($Text)
+$payloads = New-Object System.Collections.Generic.List[byte[]]
 
-if ($totalBytes -le $maxCap) {
-    $payloads = @($Text)
-} else {
+if ($AsFile) {
+    # Raw bytes, no base64: "QRFILE:<sha256 of original>:<file name>`n" + gzip. Always split with [i/N]; qr-scan.html joins and verifies.
+    $raw = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).ProviderPath)
+    if ($raw.Length -eq 0) { throw "Empty file." }
+    $ms = New-Object IO.MemoryStream
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
+    $hdr = $utf8.GetBytes("QRFILE:${hash}:$([IO.Path]::GetFileName($Path))`n")
+    $ms.Write($hdr, 0, $hdr.Length)
+    $gz = New-Object IO.Compression.GZipStream($ms, [IO.Compression.CompressionMode]::Compress)
+    $gz.Write($raw, 0, $raw.Length); $gz.Close()
+    $data = $ms.ToArray()
+    $totalBytes = $data.Length
+    Write-Host "File: $($raw.Length) bytes -> $($totalBytes - $hdr.Length) gzipped"
     $digits = 1
     do {
-        $budget = $maxCap - $(if ($NoHeader) { 0 } else { 2 * $digits + 3 })   # "[i/N]"
-        $chunks = Split-Utf8 $Text $budget
-        $retry = (-not $NoHeader) -and ($chunks.Count -ge [Math]::Pow(10, $digits))
+        $budget = $maxCap - (2 * $digits + 3)   # "[i/N]"
+        $n = [int][Math]::Ceiling($data.Length / $budget)
+        $retry = $n -ge [Math]::Pow(10, $digits)
         if ($retry) { $digits++ }
     } while ($retry)
-    $n = $chunks.Count
-    $payloads = for ($i = 0; $i -lt $n; $i++) {
-        if ($NoHeader) { $chunks[$i] } else { "[$($i + 1)/$n]" + $chunks[$i] }
+    for ($i = 0; $i -lt $n; $i++) {
+        $tag = $utf8.GetBytes("[$($i + 1)/$n]")
+        $len = [Math]::Min($budget, $data.Length - $i * $budget)
+        $chunk = New-Object byte[] ($tag.Length + $len)
+        [Array]::Copy($tag, $chunk, $tag.Length)
+        [Array]::Copy($data, $i * $budget, $chunk, $tag.Length, $len)
+        $payloads.Add($chunk)
     }
+} else {
+    if ($PSCmdlet.ParameterSetName -eq "File") { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
+    if ([string]::IsNullOrEmpty($Text)) { throw "Empty input." }
+    $totalBytes = $utf8.GetByteCount($Text)
+    if ($totalBytes -le $maxCap) {
+        $strings = @($Text)
+    } else {
+        $digits = 1
+        do {
+            $budget = $maxCap - $(if ($NoHeader) { 0 } else { 2 * $digits + 3 })   # "[i/N]"
+            $chunks = Split-Utf8 $Text $budget
+            $retry = (-not $NoHeader) -and ($chunks.Count -ge [Math]::Pow(10, $digits))
+            if ($retry) { $digits++ }
+        } while ($retry)
+        $n = $chunks.Count
+        $strings = for ($i = 0; $i -lt $n; $i++) {
+            if ($NoHeader) { $chunks[$i] } else { "[$($i + 1)/$n]" + $chunks[$i] }
+        }
+    }
+    foreach ($str in $strings) { $payloads.Add($utf8.GetBytes($str)) }
 }
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-$n = @($payloads).Count
-Write-Host "Input: $totalBytes bytes (UTF-8) -> $n QR code(s), ECC $ErrorCorrection, max version $MaxVersion"
+$n = $payloads.Count
+Write-Host "Input: $totalBytes bytes -> $n QR code(s), ECC $ErrorCorrection, max version $MaxVersion"
 
 $parts = New-Object System.Text.StringBuilder
 $idx = 0
-foreach ($pl in $payloads) {
+foreach ($bytes in $payloads) {
     $idx++
-    $bytes = $utf8.GetBytes($pl)
     $Q = New-QrMatrix $bytes $eIdx $eclBits
     $svg = ConvertTo-Svg $Q $ModulePx
     $svgFile = Join-Path $OutDir ('QR_{0:D3}.svg' -f $idx)
@@ -419,7 +440,34 @@ foreach ($pl in $payloads) {
     Write-Host ("  [{0}/{1}] version {2} ({3}x{3}), {4} bytes -> {5}" -f $idx, $n, $Q.Version, $Q.Size, $bytes.Length, $svgFile)
 }
 
-$html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>QR</title><style>body{font-family:Segoe UI,Arial,sans-serif;text-align:center}div.q{page-break-after:always;margin:24px auto}</style></head><body>$($parts.ToString())</body></html>"
+# Screen: full-screen slideshow that loops (scanner takes any order, ignores repeats). Print: one code per page.
+$head = @'
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>QR</title><style>
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;text-align:center;background:#fff;user-select:none}
+div.q{display:none;height:100vh;flex-direction:column;justify-content:center;align-items:center}
+div.q.on{display:flex}div.q h3,div.q p{margin:4px;color:#555}
+div.q svg{width:min(86vh,96vw);height:min(86vh,96vw)}
+#hud{position:fixed;bottom:6px;right:10px;font-size:13px;color:#888}
+@media print{div.q{display:block;height:auto;page-break-after:always;margin:24px auto}div.q svg{width:auto;height:auto}#hud{display:none}}
+</style></head><body>
+'@
+$tail = @'
+<div id='hud'></div><script>
+var q=document.querySelectorAll('div.q'),i=0,ms=1000,paused=false,typed='',t;
+function hud(){document.getElementById('hud').textContent=(typed?'go to '+typed+'_':(paused?'paused':(ms/1000)+'s'))+' | Space pause, arrows prev/next, Up/Down speed, number+Enter jump'}
+function go(n){q[i].classList.remove('on');i=(n+q.length)%q.length;q[i].classList.add('on')}
+function play(){clearInterval(t);if(!paused&&q.length>1)t=setInterval(function(){go(i+1)},ms);hud()}
+onkeydown=function(e){var k=e.key;
+ if(k>='0'&&k<='9'){typed+=k}
+ else if(k=='Enter'&&typed){var n=+typed;typed='';if(n>=1&&n<=q.length){go(n-1);paused=true}}
+ else if(k=='Escape'||k=='Backspace'){typed=''}
+ else if(k=='ArrowRight'||k=='ArrowLeft'){go(i+(k=='ArrowRight'?1:-1));paused=true}
+ else if(k==' '){paused=!paused}else if(k=='ArrowUp'){ms=Math.max(200,ms-200)}else if(k=='ArrowDown'){ms+=200}else return;
+ e.preventDefault();play()};
+go(0);play();
+</script></body></html>
+'@
+$html = $head + $parts.ToString() + $tail
 $htmlFile = Join-Path $OutDir 'index.html'
 Set-Content -LiteralPath $htmlFile -Value $html -Encoding UTF8
 Write-Host "HTML: $htmlFile"

@@ -151,29 +151,30 @@
 
 <script src="jsQR.js"></script>
 <script id="core">
-// Reassembles "[i/N]text" parts produced by qr.ps1; plain codes pass straight through.
+// Reassembles "[i/N]<bytes>" parts produced by qr.ps1; plain codes pass straight through. Works on raw bytes.
 let parts = {}, total = 0;
-function decode(code) { return new TextDecoder().decode(new Uint8Array(code.binaryData)); }
-function addPayload(text) {
-  const m = /^\[(\d+)\/(\d+)\]/.exec(text);
-  if (!m) return { done: text };
+function addPayload(bytes) {
+  const m = /^\[(\d+)\/(\d+)\]/.exec(String.fromCharCode(...bytes.subarray(0, 24)));
+  if (!m) return { done: bytes };
   const i = +m[1], n = +m[2];
   if (n !== total) { parts = {}; total = n; }   // a different set started
   const isNew = !(i in parts);
-  parts[i] = text.slice(m[0].length);
+  parts[i] = bytes.subarray(m[0].length);
   const missing = [];
   for (let k = 1; k <= n; k++) if (!(k in parts)) missing.push(k);
-  if (missing.length) return { have: n - missing.length, n, missing, isNew };
-  let s = ''; for (let k = 1; k <= n; k++) s += parts[k];
-  return { done: s, n, isNew };
+  if (missing.length) return { have: n - missing.length, n, i, missing, isNew };
+  let len = 0; for (let k = 1; k <= n; k++) len += parts[k].length;
+  const all = new Uint8Array(len);
+  for (let k = 1, o = 0; k <= n; o += parts[k].length, k++) all.set(parts[k], o);
+  return { done: all, n, i, isNew };
 }
 function resetParts() { parts = {}; total = 0; }
-// Unpacks "QRFILE:<sha256>:<name>\n<base64 gzip>" from qr.ps1 -AsFile. Returns null for plain text.
-async function unpackFile(text) {
-  const m = /^QRFILE:([0-9a-f]{64}):([^\n]*)\n/.exec(text);
-  if (!m) return null;
-  const gz = Uint8Array.from(atob(text.slice(m[0].length)), c => c.charCodeAt(0));
-  const data = new Uint8Array(await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+// "QRFILE:<sha256>:<name>\n<gzip bytes>" from qr.ps1 -AsFile -> { name, data, ok }; anything else -> { text }.
+async function unpack(bytes) {
+  const nl = bytes.indexOf(10);
+  const m = nl > 0 && /^QRFILE:([0-9a-f]{64}):(.*)$/.exec(new TextDecoder().decode(bytes.subarray(0, nl)));
+  if (!m) return { text: new TextDecoder().decode(bytes) };
+  const data = new Uint8Array(await new Response(new Blob([bytes.subarray(nl + 1)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('');
   return { name: m[2] || 'file.bin', data, ok: hash === m[1] };
 }
@@ -204,22 +205,20 @@ function flash() {
   clearTimeout(hitTimer); hitTimer = setTimeout(() => finder.classList.remove('hit'), 450);
 }
 
-async function show(r, text) {
-  const m = /^\[(\d+)\//.exec(text);
-  if (r.n) drawSegments(r.n, r.isNew && m ? +m[1] : 0);
+async function show(r) {
+  if (r.n) drawSegments(r.n, r.isNew ? r.i : 0);
   if (r.isNew !== false) flash();
   if ('done' in r) {
-    lastDone = r.done;
-    try { file = await unpackFile(r.done); } catch (e) { file = { error: e.message }; }
-    if (file) {
+    try { file = await unpack(r.done); } catch (e) { file = { error: e.message }; }
+    if (!('text' in file)) {
       $('out').value = file.error ? 'Could not rebuild the file: ' + file.error
         : `${file.name}\n${file.data.length.toLocaleString()} bytes\n` + (file.ok ? 'SHA-256 verified ✓' : '⚠ SHA-256 MISMATCH – the file is corrupt, rescan');
       $('save').textContent = 'Save file';
       $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + 'file';
     } else {
-      $('out').value = r.done;
+      $('out').value = file.text;
       $('save').textContent = 'Save .txt';
-      $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + `${[...r.done].length.toLocaleString()} characters`;
+      $('meta').textContent = (r.n ? `${r.n} codes joined · ` : '') + `${[...file.text].length.toLocaleString()} characters`;
     }
     setStatus(r.n ? `All ${r.n} codes scanned` : 'Code scanned');
     document.body.classList.add('done');
@@ -228,21 +227,25 @@ async function show(r, text) {
   }
 }
 
-function scan(source, w, h) {
-  canvas.width = w; canvas.height = h;
-  ctx.drawImage(source, 0, 0, w, h);
-  const code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+// crop < 1: decode only the centered square (that fraction of the short edge) at full resolution, so fewer pixels per frame.
+function scan(source, w, h, crop = 1) {
+  const cw = crop < 1 ? Math.round(Math.min(w, h) * crop) : w, ch = crop < 1 ? cw : h;
+  canvas.width = cw; canvas.height = ch;
+  ctx.drawImage(source, (cw - w) / 2, (ch - h) / 2, w, h);
+  const code = jsQR(ctx.getImageData(0, 0, cw, ch).data, cw, ch, { inversionAttempts: 'dontInvert' });
   if (!code || !code.binaryData.length) return false;
-  const text = decode(code);
-  if (text === lastDone) return true;   // same single code still in view
-  show(addPayload(text), text);
+  if (code.data === lastDone) return true;   // the code that finished the last scan is still in view
+  const r = addPayload(new Uint8Array(code.binaryData));
+  if ('done' in r) lastDone = code.data;
+  show(r);
   return true;
 }
 
+const CROP = 0.9;   // ponytail: fixed center crop, the code must sit inside the viewfinder; make it 1 if off-center codes are missed
 function loop() {
   if (!stream) return;
-  if (video.readyState >= 2 && !document.body.classList.contains('done')) scan(video, video.videoWidth, video.videoHeight);
-  setTimeout(loop, 120);
+  if (video.readyState >= 2 && !document.body.classList.contains('done')) scan(video, video.videoWidth, video.videoHeight, CROP);
+  setTimeout(loop, 30);
 }
 
 function enterScanner() {

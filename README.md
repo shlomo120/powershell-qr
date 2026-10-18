@@ -7,7 +7,7 @@
 A QR code generator in pure PowerShell. No modules, no `Add-Type`, no `System.Drawing`, no admin rights.
 Long text is split automatically across several QR codes, and each one gets an `[i/N]` prefix.
 
-**Output:** one SVG per QR code plus an `index.html` (one code per printed page), written to `.\QR_Output`.
+**Output:** written to `.\QR_Output`: one SVG per QR code plus an `index.html`. On screen the HTML is a full-screen slideshow that loops through the codes (Space = pause, arrows = prev/next, Up/Down = speed, type a number + Enter = jump to that code). Printed, it gives one code per page.
 
 ### Usage
 
@@ -49,7 +49,9 @@ powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -Erro
 On the receiving side, scan the codes with `qr-scan.html` (any order). When the last code is scanned, it rebuilds the file, checks its SHA-256 and shows **Save file**.
 
 Guidelines:
-- The file is gzipped and then base64-encoded. At `-ErrorCorrection L -MaxVersion 10` each code holds about 270 bytes of base64, so 100 KB of compressed data needs about 500 codes. Keep transfers small and zip them first if you need to.
+- The file is gzipped and sent as raw bytes. With `-ErrorCorrection L`, each code holds about 270 bytes at `-MaxVersion 10` and about 1,260 at `-MaxVersion 25`, so 100 KB of compressed data needs about 380 or 80 codes. Keep transfers small.
+- Leave the slideshow running: the scanner takes codes in any order and ignores repeats. When only a few are left, type their numbers in the slideshow (e.g. `57` + Enter) instead of waiting for the next loop.
+- Keep the code inside the scanner's viewfinder. Only the center of the camera image is read, which makes scanning faster.
 - `-Mask 0` skips the automatic mask search, which makes generation about 8x faster.
 - If you see **SHA-256 MISMATCH**, click Clear and scan everything again.
 - `-ExecutionPolicy Bypass` on the command line applies only to that run and needs no admin.
@@ -72,7 +74,7 @@ Laptop webcams struggle with dense codes, so for camera scanning generate with a
 מחולל קודי QR ב-PowerShell טהור. לא צריך מודולים, `Add-Type`, `System.Drawing` או הרשאות מנהל.
 טקסט ארוך מתפצל אוטומטית לכמה קודי QR, ולכל אחד מתווספת קידומת `[i/N]`.
 
-**פלט:** קובץ SVG לכל קוד QR, וגם `index.html` שבו כל קוד בעמוד הדפסה נפרד. הכול נשמר בתיקייה `.\QR_Output`.
+**פלט:** קובץ SVG לכל קוד QR, וגם `index.html`: מצגת במסך מלא שעוברת על הקודים בלולאה (רווח = עצירה, חיצים = הקודם/הבא, למעלה/למטה = מהירות, מספר ואז Enter = מעבר לקוד הזה). בהדפסה כל קוד יוצא בעמוד נפרד. הכול נשמר בתיקייה `.\QR_Output`.
 
 ### שימוש
 
@@ -122,7 +124,9 @@ powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -Erro
 בצד המקבל סורקים את הקודים עם `qr-scan.html`, בכל סדר. אחרי הקוד האחרון הסורק בונה מחדש את הקובץ, בודק את ה-SHA-256 שלו ומציג כפתור **Save file**.
 
 הנחיות:
-- הקובץ נדחס ב-gzip ומקודד ב-base64. עם `-ErrorCorrection L -MaxVersion 10` כל קוד מכיל כ-270 בתים של base64, כך ש-100KB אחרי דחיסה דורשים כ-500 קודים. כדאי להעביר קבצים קטנים, ולדחוס ל-zip מראש אם צריך.
+- הקובץ נדחס ב-gzip ונשלח כבתים גולמיים. עם `-ErrorCorrection L`, כל קוד מכיל כ-270 בתים ב-`-MaxVersion 10` וכ-1,260 ב-`-MaxVersion 25`, כך ש-100KB אחרי דחיסה דורשים כ-380 או כ-80 קודים. כדאי להעביר קבצים קטנים.
+- משאירים את המצגת רצה: הסורק מקבל קודים בכל סדר ומתעלם מכפילויות. כשנשארו רק כמה קודים, מקלידים את המספרים שלהם במצגת (למשל `57` ואז Enter) במקום לחכות לסיבוב הבא.
+- מחזיקים את הקוד בתוך המסגרת של הסורק. הסורק קורא רק את מרכז התמונה מהמצלמה, וכך הסריקה מהירה יותר.
 - `-Mask 0` מדלג על חיפוש המסכה האוטומטי, וכך היצירה מהירה פי 8 בערך.
 - אם מופיע **SHA-256 MISMATCH**, לוחצים Clear וסורקים הכול מחדש.
 - `-ExecutionPolicy Bypass` בשורת הפקודה חל רק על ההרצה הזו ולא דורש הרשאות מנהל.
