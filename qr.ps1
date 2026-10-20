@@ -29,13 +29,15 @@ $ErrorActionPreference = 'Stop'
 
 if ($PSBoundParameters.Count -eq 0) {
     # No flags: ask. Empty answer = default. Assignments are checked by the param Validate* attributes.
-    $in = (Read-Host "Text, or path to a file").Trim().Trim('"')
-    if (Test-Path -LiteralPath $in -PathType Leaf) {
-        $Path = $in
+    if ((Read-Host "Encode text or file? (text/file) [text]") -match '^\s*(f|p)') {
+        while (-not ($Path -and (Test-Path -LiteralPath $Path -PathType Leaf))) {
+            if ($Path) { Write-Host "File not found: $Path" -ForegroundColor Red }
+            $Path = (Read-Host "File path").Trim().Trim('"')
+        }
         $def = if ([IO.Path]::GetExtension($Path) -in '.txt', '.csv') { 'n' } else { 'y' }
         $a = Read-Host "Send as file - binary, gzip, scanner rebuilds it (y/n) [$def]"
         $AsFile = $(if ($a) { $a } else { $def }) -like 'y*'
-    } else { $Text = $in }
+    } else { $Text = Read-Host "Text" }
     if ($a = Read-Host "Error correction L/M/Q/H - L fits most data [$ErrorCorrection]") { $ErrorCorrection = $a.ToUpper() }
     if ($a = Read-Host "Max QR version 1-40 - bigger = fewer codes, harder to scan [$MaxVersion]") { $MaxVersion = $a }
     $Open = (Read-Host "Open result when done (y/n) [y]") -notlike 'n*'
