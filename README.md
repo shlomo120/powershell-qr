@@ -12,6 +12,7 @@ Long text is split automatically across several QR codes, and each one gets an `
 ### Usage
 
 ```powershell
+.\qr.ps1                      # no flags: asks for text/file and settings
 .\qr.ps1 -Text "Hello world" -Open
 .\qr.ps1 -Path .\long.txt -ErrorCorrection L -MaxVersion 20 -Open
 powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
@@ -43,7 +44,8 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 Sends any file from a locked-down PC: the sender only needs `qr.ps1`. It runs on built-in Windows PowerShell 5.1 with no admin, no install and no internet.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
+powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .
+eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
 ```
 
 On the receiving side, scan the codes with `qr-scan.html` (any order). When the last code is scanned, it rebuilds the file, checks its SHA-256 and shows **Save file**.
@@ -81,6 +83,7 @@ Laptop webcams struggle with dense codes, so for camera scanning generate with a
 </div>
 
 ```powershell
+.\qr.ps1                      # בלי פרמטרים: שואל על טקסט/קובץ והגדרות
 .\qr.ps1 -Text "שלום עולם" -Open
 .\qr.ps1 -Path .\long.txt -ErrorCorrection L -MaxVersion 20 -Open
 powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
@@ -116,7 +119,8 @@ powershell -ExecutionPolicy Bypass -File .\qr.ps1 -Path .\notes.txt
 </div>
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
+powershell -ExecutionPolicy Bypass -File .qr.ps1 -Path .
+eport.pdf -AsFile -ErrorCorrection L -MaxVersion 10 -Mask 0 -Open
 ```
 
 <div dir="rtl">

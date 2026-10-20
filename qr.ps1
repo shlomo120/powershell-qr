@@ -12,7 +12,7 @@
 #>
 [CmdletBinding(DefaultParameterSetName = 'Text')]
 param(
-    [Parameter(ParameterSetName = 'Text', Mandatory = $true, Position = 0)][string]$Text,
+    [Parameter(ParameterSetName = 'Text', Position = 0)][string]$Text,
     [Parameter(ParameterSetName = 'File', Mandatory = $true)][string]$Path,
     [ValidateSet('L', 'M', 'Q', 'H')][string]$ErrorCorrection = 'M',
     [ValidateRange(1, 40)][int]$MaxVersion = 25,      # max QR size per code (25 = 117x117 modules)
@@ -26,6 +26,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($PSBoundParameters.Count -eq 0) {
+    # No flags: ask. Empty answer = default. Assignments are checked by the param Validate* attributes.
+    $in = (Read-Host "Text, or path to a file").Trim().Trim('"')
+    if (Test-Path -LiteralPath $in -PathType Leaf) {
+        $Path = $in
+        $def = if ([IO.Path]::GetExtension($Path) -in '.txt', '.csv') { 'n' } else { 'y' }
+        $a = Read-Host "Send as file - binary, gzip, scanner rebuilds it (y/n) [$def]"
+        $AsFile = $(if ($a) { $a } else { $def }) -like 'y*'
+    } else { $Text = $in }
+    if ($a = Read-Host "Error correction L/M/Q/H - L fits most data [$ErrorCorrection]") { $ErrorCorrection = $a.ToUpper() }
+    if ($a = Read-Host "Max QR version 1-40 - bigger = fewer codes, harder to scan [$MaxVersion]") { $MaxVersion = $a }
+    $Open = (Read-Host "Open result when done (y/n) [y]") -notlike 'n*'
+}
 
 # ---------------- Tables (index: [ECC L,M,Q,H][version 0..40]) ----------------
 $EccPerBlock = @(
@@ -403,7 +417,7 @@ if ($AsFile) {
         $payloads.Add($chunk)
     }
 } else {
-    if ($PSCmdlet.ParameterSetName -eq "File") { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
+    if ($Path) { $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 }
     if ([string]::IsNullOrEmpty($Text)) { throw "Empty input." }
     $totalBytes = $utf8.GetByteCount($Text)
     if ($totalBytes -le $maxCap) {
